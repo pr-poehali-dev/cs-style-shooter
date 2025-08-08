@@ -27,6 +27,8 @@ interface Player {
   money: number;
   kills: number;
   deaths: number;
+  position: { x: number; y: number; z: number };
+  rotation: { x: number; y: number };
 }
 
 const WEAPONS: Weapon[] = [
@@ -91,9 +93,14 @@ const Index = () => {
     armor: 100,
     money: 16000,
     kills: 0,
-    deaths: 0
+    deaths: 0,
+    position: { x: 0, y: 0, z: 0 },
+    rotation: { x: 0, y: 0 }
   });
   const [crosshairPosition, setCrosshairPosition] = useState({ x: 50, y: 50 });
+  const [keys, setKeys] = useState<{[key: string]: boolean}>({});
+  const [mouseMovement, setMouseMovement] = useState({ x: 0, y: 0 });
+  const [isMouseLocked, setIsMouseLocked] = useState(false);
   const [isAiming, setIsAiming] = useState(false);
   const [gameMode, setGameMode] = useState<'weapons' | 'customization'>('weapons');
   const [weaponCustomization, setWeaponCustomization] = useState({
@@ -145,9 +152,14 @@ const Index = () => {
     }
   };
 
+  // Movement system
   useEffect(() => {
-    const handleKeyPress = (e: KeyboardEvent) => {
-      switch(e.key.toLowerCase()) {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      setKeys(prev => ({ ...prev, [key]: true }));
+      
+      // Handle special keys
+      switch(key) {
         case ' ':
           e.preventDefault();
           handleShoot();
@@ -159,9 +171,73 @@ const Index = () => {
       }
     };
 
-    window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [handleShoot]);
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      setKeys(prev => ({ ...prev, [key]: false }));
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isMouseLocked && document.pointerLockElement) {
+        setPlayer(prev => ({
+          ...prev,
+          rotation: {
+            x: Math.max(-90, Math.min(90, prev.rotation.x - e.movementY * 0.2)),
+            y: prev.rotation.y - e.movementX * 0.2
+          }
+        }));
+      }
+    };
+
+    const handlePointerLockChange = () => {
+      setIsMouseLocked(!!document.pointerLockElement);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('pointerlockchange', handlePointerLockChange);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('pointerlockchange', handlePointerLockChange);
+    };
+  }, [handleShoot, isMouseLocked]);
+
+  // Movement loop
+  useEffect(() => {
+    const moveSpeed = 0.1;
+    const interval = setInterval(() => {
+      let deltaX = 0;
+      let deltaZ = 0;
+      
+      // WASD movement
+      if (keys['w']) deltaZ -= moveSpeed;
+      if (keys['s']) deltaZ += moveSpeed;
+      if (keys['a']) deltaX -= moveSpeed;
+      if (keys['d']) deltaX += moveSpeed;
+      
+      if (deltaX !== 0 || deltaZ !== 0) {
+        setPlayer(prev => {
+          const radY = (prev.rotation.y * Math.PI) / 180;
+          const newX = prev.position.x + (deltaX * Math.cos(radY) - deltaZ * Math.sin(radY));
+          const newZ = prev.position.z + (deltaX * Math.sin(radY) + deltaZ * Math.cos(radY));
+          
+          return {
+            ...prev,
+            position: {
+              ...prev.position,
+              x: Math.max(-10, Math.min(10, newX)),
+              z: Math.max(-10, Math.min(10, newZ))
+            }
+          };
+        });
+      }
+    }, 16); // ~60fps
+    
+    return () => clearInterval(interval);
+  }, [keys]);
 
   const getWeaponIcon = (type: string) => {
     switch(type) {
@@ -387,7 +463,12 @@ const Index = () => {
           {/* 3D Game View */}
           <div 
             className="h-full relative bg-gradient-to-br from-game-dark via-gray-900 to-game-dark border-2 border-game-blue/20 m-4 rounded-lg overflow-hidden cursor-crosshair"
-            onClick={handleShoot}
+            onClick={(e) => {
+              if (!isMouseLocked) {
+                e.currentTarget.requestPointerLock();
+              }
+              handleShoot();
+            }}
           >
             {/* Crosshair */}
             <div 
@@ -413,7 +494,12 @@ const Index = () => {
             </div>
 
             {/* 3D Environment Elements */}
-            <div className="absolute inset-0">
+            <div 
+              className="absolute inset-0"
+              style={{
+                transform: `perspective(1000px) rotateX(${player.rotation.x}deg) rotateY(${player.rotation.y}deg) translate3d(${-player.position.x * 50}px, ${player.position.y * 50}px, ${player.position.z * 50}px)`
+              }}
+            >
               {/* Floor Grid */}
               <div className="absolute bottom-0 left-0 w-full h-1/2 opacity-30">
                 <div className="grid grid-cols-12 grid-rows-6 h-full">
@@ -423,17 +509,71 @@ const Index = () => {
                 </div>
               </div>
 
-              {/* 3D Boxes/Walls */}
-              <div className="absolute top-1/4 left-1/4 w-16 h-24 bg-gradient-to-b from-gray-600 to-gray-800 border border-gray-500 transform rotate-3"></div>
-              <div className="absolute top-1/3 right-1/4 w-20 h-20 bg-gradient-to-br from-gray-700 to-gray-900 border border-gray-600 transform -rotate-2"></div>
-              <div className="absolute bottom-1/3 left-1/3 w-12 h-32 bg-gradient-to-t from-gray-800 to-gray-600 border border-gray-500"></div>
+              {/* 3D Boxes/Walls - now positioned relative to player */}
+              <div 
+                className="absolute w-16 h-24 bg-gradient-to-b from-gray-600 to-gray-800 border border-gray-500"
+                style={{
+                  left: `${400 - player.position.x * 50}px`,
+                  top: `${300 - player.position.z * 50}px`,
+                  transform: 'rotateX(10deg) rotateY(20deg)'
+                }}
+              ></div>
+              <div 
+                className="absolute w-20 h-20 bg-gradient-to-br from-gray-700 to-gray-900 border border-gray-600"
+                style={{
+                  right: `${400 + player.position.x * 50}px`,
+                  top: `${200 - player.position.z * 50}px`,
+                  transform: 'rotateX(-5deg) rotateY(-15deg)'
+                }}
+              ></div>
+              <div 
+                className="absolute w-12 h-32 bg-gradient-to-t from-gray-800 to-gray-600 border border-gray-500"
+                style={
+                  {
+                  left: `${300 - player.position.x * 30}px`,
+                  bottom: `${100 + player.position.z * 30}px`,
+                  transform: 'rotateY(10deg)'
+                }}
+              ></div>
+              
+              {/* More environment objects */}
+              <div 
+                className="absolute w-24 h-16 bg-gradient-to-r from-yellow-800 to-yellow-600 border border-yellow-500"
+                style={{
+                  left: `${600 - player.position.x * 40}px`,
+                  top: `${400 - player.position.z * 40}px`,
+                  transform: 'rotateX(5deg) rotateZ(-10deg)'
+                }}
+              ></div>
+              <div 
+                className="absolute w-8 h-40 bg-gradient-to-t from-green-800 to-green-600 border border-green-500"
+                style={{
+                  right: `${200 + player.position.x * 60}px`,
+                  top: `${150 - player.position.z * 60}px`,
+                  transform: 'rotateY(30deg)'
+                }}
+              ></div>
             </div>
 
             {/* Game Instructions */}
             <div className="absolute top-4 left-4 text-white/70 text-sm">
-              <div>ПРОБЕЛ - стрелять</div>
+              <div className="mb-2 text-game-orange font-semibold">УПРАВЛЕНИЕ:</div>
+              <div>WASD - движение</div>
+              <div>Мышь - поворот камеры</div>
+              <div>ПРОБЕЛ/Клик - стрелять</div>
               <div>R - перезарядка</div>
-              <div>Клик - стрелять</div>
+              {!isMouseLocked && (
+                <div className="mt-2 text-game-blue font-semibold animate-pulse">
+                  Кликни для захвата мыши!
+                </div>
+              )}
+            </div>
+            
+            {/* Position indicator */}
+            <div className="absolute top-4 right-4 text-white/70 text-xs">
+              <div>X: {player.position.x.toFixed(1)}</div>
+              <div>Z: {player.position.z.toFixed(1)}</div>
+              <div>Поворот: {player.rotation.y.toFixed(0)}°</div>
             </div>
           </div>
         </div>
@@ -551,7 +691,23 @@ const Index = () => {
 
               <div className="bg-game-dark border border-game-blue/30 p-4 rounded-lg h-32 relative">
                 <div className="absolute inset-2 border border-game-orange/50 rounded"></div>
-                <div className="absolute top-1/2 left-1/2 w-2 h-2 bg-game-orange rounded-full transform -translate-x-1/2 -translate-y-1/2"></div>
+                {/* Player position on minimap */}
+                <div 
+                  className="absolute w-2 h-2 bg-game-orange rounded-full transform -translate-x-1/2 -translate-y-1/2"
+                  style={{
+                    left: `${50 + player.position.x * 3}%`,
+                    top: `${50 + player.position.z * 3}%`
+                  }}
+                ></div>
+                {/* Player direction indicator */}
+                <div 
+                  className="absolute w-4 h-0.5 bg-game-orange transform -translate-x-1/2 -translate-y-1/2 origin-left"
+                  style={{
+                    left: `${50 + player.position.x * 3}%`,
+                    top: `${50 + player.position.z * 3}%`,
+                    transform: `translate(-50%, -50%) rotate(${player.rotation.y}deg)`
+                  }}
+                ></div>
                 <div className="absolute top-3 right-3 w-1 h-1 bg-red-500 rounded-full animate-pulse"></div>
                 <div className="absolute bottom-3 left-3 w-1 h-1 bg-game-blue rounded-full"></div>
                 <div className="absolute top-4 left-1/3 w-1 h-1 bg-green-400 rounded-full"></div>
