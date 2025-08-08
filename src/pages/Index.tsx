@@ -9,6 +9,7 @@ const Index = () => {
     selectedWeapon,
     setSelectedWeapon,
     player,
+    setPlayer,
     crosshairPosition,
     isAiming,
     gameMode,
@@ -49,6 +50,7 @@ const Index = () => {
         {/* Main Game Area */}
         <GameView
           player={player}
+          setPlayer={setPlayer}
           weaponCustomization={weaponCustomization}
           crosshairPosition={crosshairPosition}
           isAiming={isAiming}
